@@ -1,0 +1,20 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+        {
+            "name": "Launch",
+            "type": "mono",
+            "request": "launch",
+            "program": "bin/Debug/StormIntegration.exe"
+        },
+        {
+            "request": "attach",
+            "name": "Attach",
+            "type": "mono",
+            // TCP/IP address. Default is "localhost".
+            "address": "localhost",
+            // Port to attach to.
+            "port": 5858
+        }
+    ]
+}

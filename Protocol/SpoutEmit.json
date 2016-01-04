@@ -1,0 +1,7 @@
+﻿{
+    "command": "emit",
+    "id": "1231231",
+    "stream": "1",
+    "task": 9,
+    "tuple": ["field1", 2, 3]
+}

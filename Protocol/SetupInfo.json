@@ -1,0 +1,35 @@
+﻿{
+    "conf": {
+        "topology.message.timeout.secs": 3
+    },
+    "pidDir": "...",
+    "context": {
+        "task->component": {
+            "1": "example-spout",
+            "2": "__acker",
+            "3": "example-bolt1",
+            "4": "example-bolt2"
+        },
+        "taskid": 3,
+        "componentid": "example-bolt",
+        "stream->target->grouping": {
+            "default": {
+                "example-bolt2": {
+                    "type": "SHUFFLE"}}},
+        "streams": ["default"],
+        "stream->outputfields": {"default": ["word"]},
+        "source->stream->grouping": {
+            "example-spout": {
+                "default": {
+                    "type": "FIELDS",
+                    "fields": ["word"]
+                }
+            }
+        },
+        "source->stream->fields": {
+            "example-spout": {
+                "default": ["word"]
+            }
+        }
+    }
+}
