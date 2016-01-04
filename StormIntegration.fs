@@ -20,13 +20,12 @@ let jsonSerialize o =
 
 let jsonDeserialize s = JObject.Parse s
 
-let sendStorm (o:obj) =
-    let os = stdout
-    o |> jsonSerialize |> os.WriteLine
-    "end" |> os.WriteLine
-    os.Flush()
+let toStorm (o:obj) =
+    o |> jsonSerialize |> stdout.WriteLine
+    "end" |> stdout.WriteLine
+    stdout.Flush()
 
-let recvStorm (input:TextReader) =
+let fromStorm (input:TextReader) =
     let rec getMessage (sb:System.Text.StringBuilder) =
         match input.ReadLine() with
         | "end" -> sb.ToString()
@@ -34,30 +33,30 @@ let recvStorm (input:TextReader) =
             sb.AppendLine(s) |> getMessage
     System.Text.StringBuilder() |> getMessage
 
-let writeEmit (tuple:obj array) =
-    { EmitDoc with tuple=tuple } |> sendStorm
+let emitToStorm (tuple:obj array) =
+    { EmitDoc with tuple=tuple } |> toStorm
 
-let writeLog msg =
-    { LogDoc with msg = msg } |> sendStorm
+let logToStorm msg =
+    { LogDoc with msg = msg } |> toStorm
 
-let writeSync () =
-    SyncDoc |> sendStorm
+let syncToStorm () =
+    SyncDoc |> toStorm
 
-let rec readmore (input:TextReader) =
-    let line = input |> recvStorm 
+let rec processInput (input:TextReader) =
+    let line = fromStorm <| input
     try 
         let doc = jsonDeserialize <| line
-        writeLog "Received input, about to process."
+        logToStorm "Received input, about to process."
         match doc.TryGetValue("command") with
         | true, token -> 
             match token with 
             | :? JValue as jval ->
                 match jval.Value :?> string with
                 | "next" -> 
-                    writeLog "Emitting tuples."
+                    logToStorm "Emitting tuples."
                     let tuples = [|"some";"test";"data";"from";"F#"|] 
-                    tuples |> Array.iter(fun s -> writeEmit [|s|])
-                    sprintf "Emitted %i tuples." tuples.Length |> writeLog
+                    tuples |> Array.iter(fun s -> emitToStorm [|s|])
+                    sprintf "Emitted %i tuples." tuples.Length |> logToStorm
                 | _ -> 
                     failwith "Got unknown command."
             | _ -> 
@@ -65,14 +64,14 @@ let rec readmore (input:TextReader) =
         | false, _ -> 
             failwith (sprintf "Message missing command.: %s" line)
         System.Threading.Thread.Sleep (1)
-        writeSync ()
+        syncToStorm ()
     with
     | _ as ex -> log.WarnFormat ("Input from storm ignored: '{0}'", line, ex)
-    input |> readmore
+    input |> processInput
 
 [<EntryPoint>]
 let main argv =
-    let line = stdin |> recvStorm
+    let line = fromStorm <| stdin
     let config = jsonDeserialize <| line
     match config.TryGetValue("pidDir") with 
     | true, token ->
@@ -82,8 +81,8 @@ let main argv =
             let pid = System.Diagnostics.Process.GetCurrentProcess().Id
             use fs = File.Create(Path.Combine(pidDir, pid.ToString()))
             fs.Close()
-            { Pid.pid=pid } |> sendStorm
+            { Pid.pid=pid } |> toStorm
         | _ -> failwith "pidDir had no value."
     | _ -> failwith "Missing pidDir in initial handshake."
-    stdin |> readmore
+    stdin |> processInput
     0
