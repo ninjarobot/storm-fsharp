@@ -18,33 +18,26 @@ type SpoutSyncCmd = JsonProvider<"Protocol/SpoutSyncCmd.json">
 type Emit = { command:string; id:string; stream:int; task:int; tuple:obj array }
 let EmitDoc = { Emit.command="emit"; id="0"; stream=0; task=0; tuple=[||] }
 
-let readInput (log:System.IO.StreamWriter) (input:IO.TextReader) =
+log4net.Config.XmlConfigurator.Configure() |> ignore
+
+let log = log4net.LogManager.GetLogger("StormIntegration")
+
+let readInput (input:IO.TextReader) =
     let rec getInputMessage (sb:System.Text.StringBuilder) =
-        //let line = input.ReadLine()
-        match input.Peek() with
-        //| -1 -> sb.ToString()
-        | _ ->
-            log.WriteLine("Reading next line...")
-            log.Flush()
-            match input.ReadLine() with
-            | null
-            | "end" -> sb.ToString()
-            | s ->
-                log.WriteLine(s)
-                log.Flush()
-                sb.AppendLine(s) |> getInputMessage
+        match input.ReadLine() with
+        | null
+        | "end" -> sb.ToString()
+        | s ->
+            sb.AppendLine(s) |> getInputMessage
     System.Text.StringBuilder() |> getInputMessage
 
-let writeEmit (log:System.IO.StreamWriter) =
-    let emit = { EmitDoc with tuple=[|"whatever"|] }
+let writeEmit () =
+    log.InfoFormat("About to emit()")
     let os = stdout
-    "About to emit tuple..." |> log.WriteLine
-    //emit |> JsonConvert.SerializeObject |> os.WriteLine
+    """{"command":"emit", "tuple":["whatever"]}""" |> os.WriteLine
     "end" |> os.WriteLine
-    "Emitted tuple." |> log.WriteLine
-    "Tuple emitted..." |> log.WriteLine
-    log.Flush()
     os.Flush()
+    log.InfoFormat("emit complete")
 
 let writeLog msg =
     let os = stdout
@@ -52,101 +45,64 @@ let writeLog msg =
     "end" |> os.WriteLine
     os.Flush()
 
-let writeSync (log:System.IO.StreamWriter) =
+let writeSync () =
+    log.InfoFormat("About to sync()")
     let os = stdout
     """{"command":"sync"}""" |> os.WriteLine
     "end" |> os.WriteLine
-    "Sent sync" |> log.WriteLine
-    log.Flush()
     os.Flush()
+    log.InfoFormat("sync complete")
+
+let rec readmore (input:IO.TextReader) =
+    let line = input |> readInput 
+    log.InfoFormat("Got line: {0}", line)
+    try 
+        let doc = line |> Newtonsoft.Json.Linq.JObject.Parse
+        writeLog "about to process input."
+        match doc.TryGetValue("command") with
+        | true, token -> 
+            match token with 
+            | :? JValue as jval ->
+                match jval.Value :?> string with
+                | "next" -> 
+                    log.InfoFormat("Got next command, write some tuples!!!!!")
+                    writeEmit ()
+                    writeEmit ()
+                    writeEmit ()
+                    writeEmit ()
+                    writeEmit ()
+                    writeEmit ()
+                | _ -> 
+                    failwith "Got unknown command."
+            | _ -> 
+                failwith "Got non-string commmand value."
+        | false, _ -> 
+            failwith (sprintf "Message missing command.: %s" line)
+        System.Threading.Thread.Sleep(1)
+        writeSync ()
+    with
+    | _ as ex -> log.WarnFormat("Line {0} resulted in exception: {1}", line, ex)
+    input |> readmore
 
 [<EntryPoint>]
 let main argv =
-    use log = System.IO.File.CreateText("/tmp/fstorm.log")
-    let rec readmore (input:IO.TextReader) =
-        "in readmore() " |> log.WriteLine
-        log.Flush()
-        match input |> readInput log with 
-        | "" | null -> 
-            log.WriteLine("Got no input.")
-            log.Flush()
-            log |> writeSync
-            System.Threading.Thread.Sleep(1000)
-        | line -> 
-            try
-                log.WriteLine("About to parse line")
-                let doc = line |> Newtonsoft.Json.Linq.JObject.Parse
-                line |> log.WriteLine
-                log.Flush()
-                log.WriteLine("ABOUT TO PROCESS INPUT")
-                writeLog "about to process input."
-                match doc.TryGetValue("command") with
-                | true, token -> 
-                    log.WriteLine("GOT COMMAND")
-                    match token with 
-                    | :? JValue as jval ->
-                        sprintf "Matching token: %O" jval.Value |> log.WriteLine
-                        match jval.Value :?> string with
-                        | "ack" -> 
-                            let ack = line |> SpoutAckCmd.Parse
-                            printfn "%A" ack.Id
-                            log |> writeSync
-                        | "next" -> 
-                            log |> writeEmit
-                            System.Threading.Thread.Sleep(1000)
-                            log |> writeSync
-                        | "sync" -> 
-                            log |> writeSync
-                        | "fail" -> line |> SpoutFailCmd.Parse |> printfn "%A"
-                        | "log" -> line |> SpoutLog.Parse |> printfn "%A"
-                        | "emit" -> 
-                            log |> writeEmit
-                            log |> writeSync
-                        | _ -> 
-                            log.WriteLine("Got unknown command")
-                            log.Flush()
-                            failwith "Got unknown command."
-                    | _ -> 
-                        log.WriteLine("Got non-string command value.")
-                        log.Flush()
-                        failwith "Got non-string commmand value."
-                | false, _ -> 
-                    match doc.TryGetValue("pidDir") with 
-                    | true, token -> 
-                        sprintf "Got pidDir: %O" token |> log.WriteLine 
-                        match token with 
-                        | :? JValue as jval ->
-                            let pidDir = jval.Value :?> string
-                            let id = System.Diagnostics.Process.GetCurrentProcess().Id
-                            sprintf "Writing pid file: %i" id |> log.WriteLine
-                            use fs = System.IO.File.Create(System.IO.Path.Combine([|pidDir; id.ToString()|]))
-                            fs.Close()
-                            sprintf "Sending pid response: %i" id |> log.WriteLine
-                            let os = stdout
-                            sprintf """{"pid":%i}""" id |> os.WriteLine
-                            "end" |> os.WriteLine
-                            os.Flush()
-                            sprintf """Sent {"pid":%i}""" id |> log.WriteLine
-                            log.Flush()
-                            sprintf "Done with initial spout setup: %i" id |> log.WriteLine
-                        | _ ->
-                            log.WriteLine("Received empty pidDir")
-                            log.Flush()
-                            failwith "Received empty pidDir attribute"
-                    | _false, _ ->
-                        log.WriteLine("Message missing command.") 
-                        log.Flush()
-                        failwith (sprintf "Message missing command.: %s" line)
-            with
-            | ex -> 
-                log.WriteLine(ex)
-                log.Flush()
-        log.WriteLine("Will read more...")
-        log.Flush()
-        input |> readmore
-    "Getting stdin" |> log.WriteLine
-    let instrm = stdin
-    log.WriteLine("Got stdin, about to call readmore")
-    log.Flush()
-    instrm |> readmore
+    log.InfoFormat("Logging initialized.")
+    let line = stdin |> readInput
+    let config = line |> Newtonsoft.Json.Linq.JObject.Parse
+    match config.TryGetValue("pidDir") with 
+    | true, token ->
+        match token with
+        | :? JValue as jval ->
+            let pidDir = jval.Value :?> string
+            let id = System.Diagnostics.Process.GetCurrentProcess().Id
+            use fs = System.IO.File.Create(System.IO.Path.Combine(pidDir, id.ToString()))
+            fs.Close()
+            let os = stdout
+            sprintf """{"pid":%i}""" id |> os.WriteLine
+            "end" |> os.WriteLine
+            os.Flush()
+            log.InfoFormat("Pid sent")
+        | _ -> failwith "pidDir had no value."
+    | _ -> failwith "Missing pidDir in initial handshake."
+    stdin |> readmore
     0 // return an integer exit code
