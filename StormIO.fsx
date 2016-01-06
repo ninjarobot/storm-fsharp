@@ -17,7 +17,19 @@ let AckDoc = { Ack.command="ack"; id=null }
 type Fail = { command:string; id:string }
 let FailDoc = { Fail.command="fail"; id=null }
 
-log4net.Config.XmlConfigurator.Configure() |> ignore
+let hierarchy = log4net.LogManager.GetRepository() :?> log4net.Repository.Hierarchy.Hierarchy
+let patternLayout = log4net.Layout.PatternLayout()
+patternLayout.ConversionPattern <- "%date [%thread] %-5level %logger %ndc - %message%newline"
+patternLayout.ActivateOptions()
+let appender = log4net.Appender.FileAppender()
+appender.AppendToFile <- true
+appender.File <- "/tmp/fstorm.log"
+appender.Layout <- patternLayout
+appender.ActivateOptions()
+hierarchy.Root.AddAppender(appender)
+hierarchy.Root.Level <- log4net.Core.Level.Debug
+hierarchy.Configured <- true
+
 let log = log4net.LogManager.GetLogger("StormIntegration")
 
 let jsonSerialize o =
