@@ -1,5 +1,4 @@
 #r "packages/Newtonsoft.Json.7.0.1/lib/net40/Newtonsoft.Json.dll"
-#r "packages/log4net.2.0.5/lib/net40-full/log4net.dll"
 
 open System.IO
 open Newtonsoft.Json
@@ -17,25 +16,14 @@ let AckDoc = { Ack.command="ack"; id=null }
 type Fail = { command:string; id:string }
 let FailDoc = { Fail.command="fail"; id=null }
 
-let hierarchy = log4net.LogManager.GetRepository() :?> log4net.Repository.Hierarchy.Hierarchy
-let patternLayout = log4net.Layout.PatternLayout()
-patternLayout.ConversionPattern <- "%date [%thread] %-5level %logger %ndc - %message%newline"
-patternLayout.ActivateOptions()
-let appender = log4net.Appender.FileAppender()
-appender.AppendToFile <- true
-appender.File <- "/tmp/fstorm.log"
-appender.Layout <- patternLayout
-appender.ActivateOptions()
-hierarchy.Root.AddAppender(appender)
-hierarchy.Root.Level <- log4net.Core.Level.Debug
-hierarchy.Configured <- true
-
-let log = log4net.LogManager.GetLogger("StormIntegration")
-
 let jsonSerialize o =
     JsonConvert.SerializeObject (o, Formatting.None, JsonSerializerSettings (DefaultValueHandling=DefaultValueHandling.Ignore))
 
-let jsonDeserialize s = JObject.Parse s
+let jsonDeserialize s = 
+    try 
+        Some (JObject.Parse s)
+    with
+        | _ as ex -> None
 
 let toStorm (o:obj) =
     o |> jsonSerialize |> stdout.WriteLine

@@ -1,4 +1,5 @@
 #load "StormIO.fsx"
+#load "Logging.fsx"
 
 open System.IO
 open Newtonsoft.Json.Linq
@@ -6,9 +7,10 @@ open StormIO
 
 let rec processInput (input:TextReader) =
     let line = fromStorm <| input
-    try 
-        let doc = jsonDeserialize <| line
-        logToStorm "Received input, about to process."
+    let deserialized = jsonDeserialize <| line
+    logToStorm "Received input, about to process."
+    match deserialized with
+    | Some doc ->
         match doc.TryGetValue("command") with
         | true, token -> 
             match token with 
@@ -27,21 +29,23 @@ let rec processInput (input:TextReader) =
             failwith (sprintf "Message missing command.: %s" line)
         System.Threading.Thread.Sleep (1)
         syncToStorm ()
-    with
-    | _ as ex -> log.WarnFormat ("Input from storm ignored: '{0}'", line, ex)
+    | None -> sprintf "Input from storm ignored: '%s'" line |> Logging.Warn
     input |> processInput
 
 let line = fromStorm <| stdin
-let config = jsonDeserialize <| line
-match config.TryGetValue("pidDir") with 
-| true, token ->
-    match token with
-    | :? JValue as jval ->
-        let pidDir = jval.Value :?> string
-        let pid = System.Diagnostics.Process.GetCurrentProcess().Id
-        use fs = File.Create(Path.Combine(pidDir, pid.ToString()))
-        fs.Close()
-        { Pid.pid=pid } |> toStorm
-    | _ -> failwith "pidDir had no value."
-| _ -> failwith "Missing pidDir in initial handshake."
-stdin |> processInput |> ignore
+let deserialized = jsonDeserialize <| line
+match deserialized with
+| Some config ->
+    match config.TryGetValue("pidDir") with 
+    | true, token ->
+        match token with
+        | :? JValue as jval ->
+            let pidDir = jval.Value :?> string
+            let pid = System.Diagnostics.Process.GetCurrentProcess().Id
+            use fs = File.Create(Path.Combine(pidDir, pid.ToString()))
+            fs.Close()
+            { Pid.pid=pid } |> toStorm
+        | _ -> failwith "pidDir had no value."
+    | _ -> failwith "Missing pidDir in initial handshake."
+    stdin |> processInput |> ignore
+| None -> failwith (sprintf "Invalid handshake: %s" line)

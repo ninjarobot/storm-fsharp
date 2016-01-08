@@ -1,4 +1,5 @@
 #load "StormIO.fsx"
+#load "Logging.fsx"
 
 open System.IO
 open Newtonsoft.Json.Linq
@@ -17,16 +18,17 @@ let isHeartbeat (json:JObject) =
 
 let rec processInput (input:TextReader) =
     let line = fromStorm <| input
-    log.InfoFormat("Bolt line: {0}", line)
-    try 
-        let doc = jsonDeserialize <| line
-        logToStorm "Received input, about to process."
+    sprintf "Bolt line: '%s'" line |> Logging.Debug
+    let deserialized = jsonDeserialize <| line
+    match deserialized with 
+    | Some doc ->
+        "Received input, about to process." |> Logging.Debug
         match doc |> isHeartbeat with
         | true ->
-            "Received heartbeat." |> logToStorm
+            "Received heartbeat." |> Logging.Debug
             syncToStorm ()
         | false ->
-            "Received tuple" |> logToStorm
+            "Received tuple" |> Logging.Debug
             match doc.TryGetValue("id") with
             | true, idToken -> 
                 match idToken with 
@@ -38,37 +40,32 @@ let rec processInput (input:TextReader) =
                         | :? JArray as jarr ->
                             let tuple = jarr.ToObject<obj[]>()
                             let word = tuple.[0] :?> string
-                            sprintf "Got tuple %s" word |> logToStorm
-                            log.InfoFormat("Got tuple: {0}", word)
                             emitToStorm[|word; word.Length|]
-                            log.InfoFormat("Emitted tuple")
                             ackToStorm tupleId
-                            log.InfoFormat("Ack'd tuple with ID {0}.", tupleId)
-                            "Emitted tuple with length" |> logToStorm
                         | _ -> failwith "Missing tuple data."
                     | _ -> failwith "Missing tuple element."
                 | _ ->
                     "Invalid tuple id" |> logToStorm 
-                    //failwith "Invalid tuple id."
-                    log.ErrorFormat("Invalid tuple id.")
             | false, _ -> 
-                log.ErrorFormat("Missing id.")
+                "Missing id." |> Logging.Error
                 failwith (sprintf "Message missing id.: %s" line)
-    with
-    | _ as ex -> log.WarnFormat ("Input from storm ignored: {0} {1}", line, ex)
+    | None -> sprintf "Malformed input from storm ignored: '%s'" line |> Logging.Warn
     input |> processInput
 
 let line = fromStorm <| stdin
-let config = jsonDeserialize <| line
-match config.TryGetValue("pidDir") with 
-| true, token ->
-    match token with
-    | :? JValue as jval ->
-        let pidDir = jval.Value :?> string
-        let pid = System.Diagnostics.Process.GetCurrentProcess().Id
-        use fs = File.Create(Path.Combine(pidDir, pid.ToString()))
-        fs.Close()
-        { Pid.pid=pid } |> toStorm
-    | _ -> failwith "pidDir had no value."
-| _ -> failwith "Missing pidDir in initial handshake."
-stdin |> processInput |> ignore
+let deserialized = jsonDeserialize <| line
+match deserialized with
+| Some config ->
+    match config.TryGetValue("pidDir") with 
+    | true, token ->
+        match token with
+        | :? JValue as jval ->
+            let pidDir = jval.Value :?> string
+            let pid = System.Diagnostics.Process.GetCurrentProcess().Id
+            use fs = File.Create(Path.Combine(pidDir, pid.ToString()))
+            fs.Close()
+            { Pid.pid=pid } |> toStorm
+        | _ -> failwith "pidDir had no value."
+    | _ -> failwith "Missing pidDir in initial handshake."
+    stdin |> processInput |> ignore
+| None -> failwith (sprintf "Invalid handshake: %s" line)
